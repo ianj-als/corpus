@@ -59,7 +59,7 @@ public class Main {
         new File(sourcefile),
         new File(targetfile),
         Charset.forName("UTF-8"),
-        "sorted",
+        "uniq",
         100,
         new File("/tmp"),
         Charset.forName("UTF-8"));    
