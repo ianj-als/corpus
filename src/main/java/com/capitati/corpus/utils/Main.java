@@ -11,6 +11,12 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.log4j.BasicConfigurator;
+import org.apache.log4j.EnhancedPatternLayout;
+import org.apache.log4j.FileAppender;
+import org.apache.log4j.Logger;
+import org.apache.log4j.spi.NOPLogger;
+import org.apache.log4j.spi.NOPLoggerRepository;
 
 public class Main {
   @SuppressWarnings("static-access")
@@ -59,13 +65,13 @@ public class Main {
           withLongOpt("workingdir").
           withDescription("Working directory for temporary files").
           hasArg().
-          withArgName("DIRNAME").
+          withArgName("DIR NAME").
           create());
     options.addOption(
         OptionBuilder.
           withLongOpt("nofiles").
           withDescription("The number of temporary files to use for the " +
-                          "sort phase. (Hint only)").
+                          "sort phase (Hint only)").
           hasArg().
           withType(Integer.class).
           create());
@@ -74,6 +80,21 @@ public class Main {
           withLongOpt("verbose").
           withDescription("Verbose output").
           hasArg(false).
+          create());
+    options.addOption(
+        OptionBuilder.
+          withLongOpt("logfile").
+          withDescription("Log the corpus drops and duplications").
+          hasArgs().
+          withArgName("LOG FILENAME").
+          create());
+    options.addOption(
+        OptionBuilder.
+          withLongOpt("maxnotokens").
+          withDescription("The maximum number of tokens in the source").
+          hasArg().
+          withArgName("NUM TOKENS").
+          withType(Integer.class).
           create());
     
     return options;
@@ -102,21 +123,45 @@ public class Main {
       final String outputCharSet = cl.getOptionValue("outputcharset", "UTF-8");
       final String suffix = cl.getOptionValue("suffix", "uniq");
       final String workingDir = cl.getOptionValue("workingdir", "/tmp");
+      final String logFile = cl.getOptionValue("logfile", null);
       final int noFiles = Integer.parseInt(cl.getOptionValue("nofiles", "100"));
+      final int maxNoTokens =
+          Integer.parseInt(cl.getOptionValue("maxnotokens", "-1"));
       final boolean verbose = cl.hasOption("verbose");
+      
+      Logger logger = null;
+      if(logFile != null) {
+        BasicConfigurator.configure(
+            new FileAppender(
+                new EnhancedPatternLayout(
+                    "%d{dd MMM yyyy HH:mm:ss,SSS}: %-5p: %m%n"),
+                logFile));
+        logger = Logger.getLogger("uniquer");
+      } else {
+        BasicConfigurator.configure();
+        logger = new NOPLogger(new NOPLoggerRepository(), "uniquer");
+      }
       
       final CorpusUniquer sorter = new CorpusUniquer(
           new File(sourceFile),
           new File(targetFile),
           Charset.forName(inputCharSet),
-          suffix,
           noFiles,
           new File(workingDir),
-          Charset.forName(outputCharSet));
-      final ImmutablePair<Long, Long> result = sorter.unique();
+          Charset.forName(outputCharSet),
+          logger);
+      final ImmutablePair<Long, Long> result = sorter.unique(suffix, maxNoTokens);
+
+      logger.info(
+          "Dropped " + result.getLeft() + " duplicates from " +
+          result.getRight() + " sentence pairs");
       
-      if(verbose)
-        System.out.println(String.format("Dropped %d duplicates", result.getLeft()));
+      if(verbose) {
+        System.out.println(
+            String.format(
+                "Dropped %d duplicates from %d sentence pairs",
+                result.getLeft(), result.getRight()));
+      }
     } catch(final ParseException ex) {
       displayHelp(options);
     }

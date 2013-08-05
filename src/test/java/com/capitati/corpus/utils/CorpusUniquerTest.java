@@ -6,66 +6,24 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.List;
 
 import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.junit.After;
-import org.junit.Before;
+import org.apache.log4j.BasicConfigurator;
+import org.apache.log4j.ConsoleAppender;
+import org.apache.log4j.EnhancedPatternLayout;
+import org.apache.log4j.Logger;
 import org.junit.Test;
 
 /**
  * Unit test for simple App.
  */
 public class CorpusUniquerTest {
-	private static final String TEST_FILE1_TXT = "test-file-1.txt";
-	private static final String TEST_FILE2_TXT = "test-file-2.txt";
-	private static final String TEST_FILE1_CSV = "test-file-1.csv";
-	private static final String[] EXPECTED_SORT_RESULTS = { "a", "b", "b", "e", "f",
-			"i", "m", "o", "u", "u", "x", "y", "z" };
-	private static final String[] EXPECTED_MERGE_RESULTS = {"a", "a", "b", "c", "c", "d", "e", "e", "f", "g", "g","h", "i", "j", "k"};
-	private static final String[] EXPECTED_MERGE_DISTINCT_RESULTS = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"};
-	private static final String[] EXPECTED_HEADER_RESULTS = {"HEADER, HEADER", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"};
-	private static final String[] EXPECTED_DISTINCT_RESULTS = { "a", "b", "e",
-			"f", "i", "m", "o", "u", "x", "y", "z" };
-	private static final String[] SAMPLE = { "f", "m", "b", "e", "i", "o", "u",
-			"x", "a", "y", "z", "b", "u" };
-
-	private File file1;
-	private File file2;
-	private File csvFile;
-	private List<File> fileList;
-
-	@Before
-	public void setUp() throws Exception {
-		this.fileList = new ArrayList<File>(3);
-		this.file1 = new File(this.getClass().getClassLoader()
-				.getResource(TEST_FILE1_TXT).toURI());
-		this.file2 = new File(this.getClass().getClassLoader()
-				.getResource(TEST_FILE2_TXT).toURI());
-		this.csvFile = new File(this.getClass().getClassLoader()
-		        .getResource(TEST_FILE1_CSV).toURI());
-
-		File tmpFile1 = new File(this.file1.getPath().toString()+".tmp");
-		File tmpFile2 = new File(this.file2.getPath().toString()+".tmp");
-
-		copyFile(this.file1, tmpFile1);
-		copyFile(this.file2, tmpFile2);
-		
-		this.fileList.add(tmpFile1);
-		this.fileList.add(tmpFile2);
-	}
-
-	@After
-	public void tearDown() throws Exception {
-		this.file1 = null;
-		this.file2 = null;
-		this.csvFile = null;
-		for(File f:this.fileList){
-			f.delete();
-		}
-		this.fileList.clear();
-		this.fileList = null;
+	{
+	  BasicConfigurator.configure(
+	      new ConsoleAppender(
+	          new EnhancedPatternLayout(
+	              "%d{dd MMM yyyy HH:mm:ss,SSS}: %p: %m%n"),
+	              ConsoleAppender.SYSTEM_ERR));
 	}
 	
 	private static void copyFile(File sourceFile, File destFile) throws IOException {
@@ -99,16 +57,18 @@ public class CorpusUniquerTest {
     final File targetFile =
         new File(this.getClass().getClassLoader().
             getResource("test.non").toURI());
+    final Logger logger = Logger.getRootLogger();
 
     final CorpusUniquer sorter = new CorpusUniquer(
         sourceFile,
         targetFile,
         Charset.forName("UTF-8"),
-        "uniq",
         10,
         new File("/tmp"),
-        Charset.forName("UTF-8"));    
-    final ImmutablePair<Long, Long> result = sorter.unique();
+        Charset.forName("UTF-8"),
+        logger);
+    final ImmutablePair<Long, Long> result =
+        sorter.unique("uniq", ICorpusUniquer.UNLIMITED_TOKENS);
 
     System.out.println(String.format("Dropped %d dups", result.getLeft()));
 //    for(final String source : dups.keySet()) {
@@ -125,16 +85,18 @@ public class CorpusUniquerTest {
     final File targetFile =
         new File(this.getClass().getClassLoader().
             getResource("clean-train.lt").toURI());
+    final Logger logger = Logger.getRootLogger();
 
     final CorpusUniquer sorter = new CorpusUniquer(
         sourceFile,
         targetFile,
         Charset.forName("UTF-8"),
-        "uniq",
         10,
         new File("/tmp"),
-        Charset.forName("UTF-8"));    
-    final ImmutablePair<Long, Long> result = sorter.unique();
+        Charset.forName("UTF-8"),
+        logger);
+    final ImmutablePair<Long, Long> result =
+        sorter.unique("uniq", ICorpusUniquer.UNLIMITED_TOKENS);
 
     System.out.println(String.format("Dropped %d dups", result.getLeft()));
 //    for(final String source : dups.keySet()) {

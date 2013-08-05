@@ -17,18 +17,17 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.log4j.Logger;
 
 import com.google.common.base.Function;
 
 public class CorpusUniquer implements ICorpusUniquer {
-
-  public final static int DEFAULTMAXTEMPFILES = 1024;
-
   // we divide the file into small blocks. If the blocks
   // are too small, we shall create too many temporary files.
   // If they are too big, we shall be using too much memory.
@@ -56,7 +55,7 @@ public class CorpusUniquer implements ICorpusUniquer {
 
   private List<ImmutablePair<File, File>> sortInBatch(
       final Comparator<String> comparator,
-      final Function<String, String> lineProcessor)
+      final Function<String, Boolean> filter)
   throws IOException {
     final List<ImmutablePair<File, File>> files =
         new ArrayList<ImmutablePair<File, File>>();
@@ -93,10 +92,18 @@ public class CorpusUniquer implements ICorpusUniquer {
               if(sourceLine == null) {
                 break;
               }
-
+              
               // Read the target line...
               targetLine = targetReader.readLine();
-              
+
+              // Filter on the number of tokens
+              if(filter.apply(sourceLine) == false) {
+                logger.info(
+                    "Dropping source sentence [" + sourceLine + "]" +
+                    " with target sentence [" + targetLine + "]");
+                continue;
+              }
+
               // Add current source line
               lines.add(
                   new ImmutablePair<String, String>(sourceLine, targetLine));
@@ -105,20 +112,26 @@ public class CorpusUniquer implements ICorpusUniquer {
               // that the simple 2 * String.length
               currentblocksize +=
                   StringSizeEstimator.estimatedSizeOf(sourceLine);
-//              currentblocksize +=
-//                  StringSizeEstimator.estimatedSizeOf(targetLine);
             }
 
             final ImmutablePair<File, File> tempFiles =
-                sortAndSave(lines, comparator, lineProcessor);
-            files.add(tempFiles);
+                sortAndSave(lines, comparator);
+            try {
+              files.add(tempFiles);
+            } catch(final NullPointerException ex) {
+              // Ignore...
+            }
             lines.clear();
           }
         } catch(EOFException oef) {
           if(lines.size() > 0) {
             final ImmutablePair<File, File> tempFiles =
-                sortAndSave(lines, comparator, lineProcessor);
-            files.add(tempFiles);
+                sortAndSave(lines, comparator);
+            try {
+              files.add(tempFiles);
+            } catch(final NullPointerException ex) {
+              // Ignore...
+            }
             lines.clear();
           }
         }
@@ -134,8 +147,11 @@ public class CorpusUniquer implements ICorpusUniquer {
 
   private ImmutablePair<File, File> sortAndSave(
       final List<ImmutablePair<String, String>> lines,
-      final Comparator<String> stringComparator,
-      final Function<String, String> lineProcessor) throws IOException {
+      final Comparator<String> stringComparator) throws IOException {
+    if(lines.size() < 1) {
+      return null;
+    }
+
     final Comparator<ImmutablePair<String, String>> comparator =
         new Comparator<ImmutablePair<String, String>>() {
           @Override
@@ -188,7 +204,7 @@ public class CorpusUniquer implements ICorpusUniquer {
       final List<ImmutablePair<File, File>> temporaryFiles,
       final Comparator<String> cmp,
       final Function<String, String> lineProcessor)
-          throws IOException {
+  throws IOException {
     // Populate priority queue with temporary files
     final PriorityQueue<ImmutablePair<BinaryFileBuffer, BinaryFileBuffer>> pq =
         new PriorityQueue<ImmutablePair<BinaryFileBuffer, BinaryFileBuffer>>(
@@ -254,14 +270,10 @@ public class CorpusUniquer implements ICorpusUniquer {
             // Lookup target line
             targetLine = bufferPair.getRight().pop();
 
-//            System.err.println("Source " + sourceLine + " (" + procSourceLine + ")");
-//            System.err.println("Target " + targetLine);
-
             if(procSourceLine.compareTo(lastProcSourceLine) == 0) {
               procTargetLine = lineProcessor.apply(targetLine);
 
               if(targetLines.contains(procTargetLine) == false) {
-                //                  System.err.println("PROC TL " + procTargetLine);
                 targetLines.add(procTargetLine);
 
                 // Write source and target lines
@@ -273,11 +285,12 @@ public class CorpusUniquer implements ICorpusUniquer {
                     lineCounter);
               } else {
                 // Update the duplicates
-                //                  System.err.println("DUP!");
+                logger.info(
+                    "Duplicate sentence pair, source [" + sourceLine + "] with " +
+                    "target [" + targetLine + "]");
                 noDuplicates++;
               }
             } else {
-              //                System.err.println("NEW SET");
               // Make a new set
               targetLines.clear();
               targetLines.add(lineProcessor.apply(targetLine));
@@ -338,27 +351,29 @@ public class CorpusUniquer implements ICorpusUniquer {
   private final File tempDirectory;
   private final Charset inputCharSet;
   private final Charset outputCharSet;
-  private final String sortedExtension;
   private final int maxNoTempFiles;
+  private final Logger logger;
 
   public CorpusUniquer(
       final File theSourceFile,
       final File theTargetFile,
       final Charset theInputCharSet,
-      final String theSortedExtension,
       final int theMaxNumOfTempFiles,
       final File theTempDirectory,
-      final Charset theOutputCharSet) {
+      final Charset theOutputCharSet,
+      final Logger theLogger) {
     sourceFile = theSourceFile;
     targetFile = theTargetFile;
     tempDirectory = theTempDirectory;
     inputCharSet = theInputCharSet;
     outputCharSet = theOutputCharSet;
-    sortedExtension = theSortedExtension;
     maxNoTempFiles = theMaxNumOfTempFiles;
+    logger = theLogger;
   }
-
-  public ImmutablePair<Long, Long> unique() throws Exception {
+  
+  public ImmutablePair<Long, Long> unique(
+      final String suffix, final int maxNoTokens)
+  throws Exception {
     final List<File> missingFiles = new ArrayList<File>() {
       private static final long serialVersionUID = 2350695434693544950L;
       {
@@ -369,24 +384,10 @@ public class CorpusUniquer implements ICorpusUniquer {
     if(missingFiles.size() > 0) {
       throw new FileNotFoundException(
           String.format(
-              "Missing files: %s", StringUtils.join(missingFiles, ", ")));
+              "Missing files or directories: %s",
+              StringUtils.join(missingFiles, ", ")));
     }
 
-//    final FileLineCounter counter =
-//        new FileLineCounter(inputCharSet, sourceFile, targetFile);
-//    final Map<File, Long> lineNos = counter.countLines();
-//    final long sourceLineNos = lineNos.get(sourceFile);
-//    final long targetLineNos = lineNos.get(targetFile);
-//    if(sourceLineNos != targetLineNos) {
-//      throw new Exception("Source and target files have line count mismatch");
-//    }
-
-    final Function<String, String> lineProcessor = new Function<String, String>() {
-      public String apply(final String line) {
-        return line.toLowerCase().replaceAll("[ ]+", "_");
-      }
-    };
-    
     final Comparator<String> comparator = new Comparator<String>() {
       @Override
       public int compare(String r1, String r2) {
@@ -394,14 +395,42 @@ public class CorpusUniquer implements ICorpusUniquer {
       }
     };
 
+    final Function<String, Boolean> filter =
+        (maxNoTokens <= ICorpusUniquer.UNLIMITED_TOKENS) ?
+            new Function<String, Boolean>() {
+              public Boolean apply(final String line) {
+                return true;
+              }
+            } :
+            new Function<String, Boolean>() {
+              public Boolean apply(final String line) {
+                final String[] split = line.split("[ ]+");
+                return split.length <= maxNoTokens;
+              }
+            };
+
+    logger.info(
+        "Starting uniquing with [" + sourceFile.getCanonicalPath() +
+        "] and [" + targetFile.getCanonicalPath() + "] filtering on " +
+        ((maxNoTokens == ICorpusUniquer.UNLIMITED_TOKENS) ?
+            "infinite number of" :
+            maxNoTokens) +
+        " tokens using suffix [" + suffix + "]...");
+    
     // Sort...
     final List<ImmutablePair<File, File>> tempFiles =
-        sortInBatch(comparator, lineProcessor);
+        sortInBatch(comparator, filter);
     // ...and merge
     final File outputSourceFile = new File(
-        sourceFile.getAbsolutePath() + "." + sortedExtension);
+        sourceFile.getAbsolutePath() + "." + suffix);
     final File outputTargetFile = new File(
-        targetFile.getAbsolutePath() + "." + sortedExtension);
+        targetFile.getAbsolutePath() + "." + suffix);
+    final Function<String, String> lineProcessor =
+        new Function<String, String>() {
+          public String apply(final String line) {
+            return line.toLowerCase().replaceAll("[ ]+", "_");
+          }
+        };
     final ImmutablePair<Long, Long> result =
         mergeSortedFiles(
             outputSourceFile,
@@ -410,7 +439,24 @@ public class CorpusUniquer implements ICorpusUniquer {
             comparator,
             lineProcessor);
     
+    logger.info("Finished uniquing");
+    
     return result;
+  }
+  
+  public ImmutablePair<Long, Long> uniqueWithLineCountCheck(
+      final String suffix, final int maxNoTokens)
+  throws Exception {
+    final FileLineCounter counter =
+        new FileLineCounter(inputCharSet, sourceFile, targetFile);
+    final Map<File, Long> lineNos = counter.countLines();
+    final long sourceLineNos = lineNos.get(sourceFile);
+    final long targetLineNos = lineNos.get(targetFile);
+    if(sourceLineNos != targetLineNos) {
+      throw new Exception("Source and target files have line count mismatch");
+    }
+
+    return unique(suffix, maxNoTokens);
   }
 }
 
@@ -461,5 +507,4 @@ class BinaryFileBuffer {
     reload();
     return answer;
   }
-
 }
