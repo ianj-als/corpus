@@ -153,14 +153,14 @@ public class Main {
       final ImmutablePair<Long, Long> result = sorter.unique(suffix, maxNoTokens);
 
       logger.info(
-          "Dropped " + result.getLeft() + " duplicates from " +
-          result.getRight() + " sentence pairs");
+          "Wrote " + result.getRight() + " sentence pairs and dropped " +
+          result.getLeft() + " duplicates.");
       
       if(verbose) {
         System.out.println(
             String.format(
-                "Dropped %d duplicates from %d sentence pairs",
-                result.getLeft(), result.getRight()));
+                "Wrote %d sentence pairs and dropped %d duplicates",
+                result.getRight(), result.getLeft()));
       }
     } catch(final ParseException ex) {
       displayHelp(options);
