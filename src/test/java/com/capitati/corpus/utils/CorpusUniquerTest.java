@@ -17,7 +17,7 @@ import org.junit.Test;
 /**
  * Unit test for simple App.
  */
-public class ExternalSortTest {
+public class CorpusUniquerTest {
 	private static final String TEST_FILE1_TXT = "test-file-1.txt";
 	private static final String TEST_FILE2_TXT = "test-file-2.txt";
 	private static final String TEST_FILE1_CSV = "test-file-1.csv";
@@ -92,6 +92,32 @@ public class ExternalSortTest {
 	}
 
 	@Test
+	public void testCorpusSortWithDuplicates() throws Exception {
+    final File sourceFile =
+        new File(this.getClass().getClassLoader().
+            getResource("test.en").toURI());
+    final File targetFile =
+        new File(this.getClass().getClassLoader().
+            getResource("test.non").toURI());
+
+    final CorpusUniquer sorter = new CorpusUniquer(
+        sourceFile,
+        targetFile,
+        Charset.forName("UTF-8"),
+        "uniq",
+        10,
+        new File("/tmp"),
+        Charset.forName("UTF-8"));    
+    final ImmutablePair<Long, Long> result = sorter.unique();
+
+    System.out.println(String.format("Dropped %d dups", result.getLeft()));
+//    for(final String source : dups.keySet()) {
+//      System.out.println(source);
+//      System.out.println(StringUtils.join(dups.get(source), "\t\n"));
+//    }
+  }
+	
+	@Test
 	public void testCorpusSort() throws Exception {
     final File sourceFile =
         new File(this.getClass().getClassLoader().
@@ -100,15 +126,15 @@ public class ExternalSortTest {
         new File(this.getClass().getClassLoader().
             getResource("clean-train.lt").toURI());
 
-    final CorpusSorter sorter = new CorpusSorter(
+    final CorpusUniquer sorter = new CorpusUniquer(
         sourceFile,
         targetFile,
         Charset.forName("UTF-8"),
-        "sorted",
+        "uniq",
         10,
         new File("/tmp"),
         Charset.forName("UTF-8"));    
-    final ImmutablePair<Long, Long> result = sorter.sortWithUniquing();
+    final ImmutablePair<Long, Long> result = sorter.unique();
 
     System.out.println(String.format("Dropped %d dups", result.getLeft()));
 //    for(final String source : dups.keySet()) {

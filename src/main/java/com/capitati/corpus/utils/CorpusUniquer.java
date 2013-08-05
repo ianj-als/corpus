@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,13 +22,13 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 
-import org.apache.batik.ext.awt.image.codec.FileCacheSeekableStream;
+import org.apache.batik.ext.awt.image.codec.ForwardSeekableStream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 
 import com.google.common.base.Function;
 
-public class CorpusSorter implements ICorpusSorter {
+public class CorpusUniquer implements ICorpusUniquer {
 
   public final static int DEFAULTMAXTEMPFILES = 1024;
 
@@ -71,18 +72,16 @@ public class CorpusSorter implements ICorpusSorter {
 
     try {
       // Target file...
-      final BufferedReader targetReader =
-          new BufferedReader(
-              new InputStreamReader(
-                  new FileInputStream(targetFile), inputCharSet));
+      final ForwardSeekableStream targetReader =
+          new ForwardSeekableStream(new FileInputStream(targetFile));
 
       try {
         // List of source file lines and target file positions
-        final List<ImmutablePair<String, String>> lines =
-            new ArrayList<ImmutablePair<String, String>>();
+        final List<ImmutablePair<String, Long>> lines =
+            new ArrayList<ImmutablePair<String, Long>>();
 
         String sourceLine = "";
-        String targetLine = null;
+        long currentTargetPos = 0;
 
         try {
           while(sourceLine != null) {
@@ -96,19 +95,17 @@ public class CorpusSorter implements ICorpusSorter {
               }
 
               // Read the target line...
-              targetLine = targetReader.readLine();
-              if(targetLine == null) {
-                break;
-              }
+              currentTargetPos = targetReader.getFilePointer();
+              targetReader.readLine();
               
               // Add current source line
               lines.add(
-                  new ImmutablePair<String, String>(sourceLine, targetLine));
+                  new ImmutablePair<String, Long>(sourceLine, currentTargetPos));
 
               // ram usage estimation, not very accurate, still more realistic
               // that the simple 2 * String.length
               currentblocksize +=
-                  StringSizeEstimator.estimatedSizeOf(sourceLine + targetLine);
+                  StringSizeEstimator.estimatedSizeOf(sourceLine);
             }
 
             final File tempFile = sortAndSave(lines, comparator, lineProcessor);
@@ -133,24 +130,16 @@ public class CorpusSorter implements ICorpusSorter {
   }
 
   private File sortAndSave(
-      final List<ImmutablePair<String, String>> linesAndPositions,
+      final List<ImmutablePair<String, Long>> linesAndPositions,
       final Comparator<String> stringComparator,
       final Function<String, String> lineProcessor) throws IOException {
-    final Comparator<ImmutablePair<String, String>> comparator =
-        new Comparator<ImmutablePair<String, String>>() {
+    final Comparator<ImmutablePair<String, Long>> comparator =
+        new Comparator<ImmutablePair<String, Long>>() {
           @Override
           public int compare(
-              final ImmutablePair<String, String> p1,
-              final ImmutablePair<String, String> p2) {
-            final String str_one = p1.getLeft();
-            final String str_two = p2.getLeft();
-            final String norm_str_one = lineProcessor.apply(str_one);
-            final String norm_str_two = lineProcessor.apply(str_two);
-            final int normalised_cmp = norm_str_one.compareTo(norm_str_two);
-            
-            return (normalised_cmp != 0) ?
-                normalised_cmp :
-                stringComparator.compare(str_one, str_two);
+              final ImmutablePair<String, Long> p1,
+              final ImmutablePair<String, Long> p2) {
+            return stringComparator.compare(p1.getLeft(), p2.getLeft());
           }
         };
     Collections.sort(linesAndPositions, comparator);
@@ -165,10 +154,9 @@ public class CorpusSorter implements ICorpusSorter {
             new OutputStreamWriter(out, outputCharSet));
 
     try {
-      for(ImmutablePair<String, String> pair : linesAndPositions) {
+      for(ImmutablePair<String, Long> pair : linesAndPositions) {
+        fbw.write(String.format("%016x,", pair.getRight()));
         fbw.write(pair.getLeft());
-        fbw.newLine();
-        fbw.write(pair.getRight());
         fbw.newLine();
       }
     } finally {
@@ -183,7 +171,20 @@ public class CorpusSorter implements ICorpusSorter {
       final File outputTargetFile,
       final List<File> temporaryFiles,
       final Comparator<String> cmp,
-      final Function<String, String> lineProcessor) throws IOException {
+      final Function<String, String> lineProcessor)
+          throws IOException {
+    // Raw temporary file line parser
+    final Function<String, ImmutablePair<String, String>> lineParser =
+        new Function<String, ImmutablePair<String, String>>() {
+      public ImmutablePair<String, String> apply(final String rawLine) {
+        final int commaIdx = rawLine.indexOf(',');
+        final String fileKey = rawLine.substring(0, commaIdx);
+        final String line = rawLine.substring(commaIdx + 1);
+
+        return new ImmutablePair<String, String>(fileKey, line);
+      }
+    };
+
     // Populate priority queue with temporary files
     final PriorityQueue<BinaryFileBuffer> pq =
         new PriorityQueue<BinaryFileBuffer>(
@@ -193,7 +194,14 @@ public class CorpusSorter implements ICorpusSorter {
               public int compare(
                   final BinaryFileBuffer i,
                   final BinaryFileBuffer j) {
-                return cmp.compare(i.peek(), j.peek());
+                final ImmutablePair<String, String> iLine =
+                    lineParser.apply(i.peek());
+                final ImmutablePair<String, String> jLine =
+                    lineParser.apply(j.peek());
+                final String str_one = iLine.getRight();
+                final String str_two = jLine.getRight();
+
+                return cmp.compare(str_one, str_two);
               }
             });
     for(final File f : temporaryFiles) {
@@ -209,82 +217,103 @@ public class CorpusSorter implements ICorpusSorter {
                   new FileOutputStream(outputSourceFile), outputCharSet));
 
       try {
-        // Target file writer...
-        final BufferedWriter targetWriter =
-            new BufferedWriter(
-                new OutputStreamWriter(
-                    new FileOutputStream(outputTargetFile), outputCharSet));
+        // Target file reader...
+        final FileInputStream targetInputStream =
+            new FileInputStream(targetFile);
+        final FileChannel targetInputChannel = targetInputStream.getChannel();
 
         try {
-          // Merge...
-          long lineCounter = 0;
-          long noDuplicates = 0;
-          String sourceLine = null;
-          String procSourceLine = null;
-          String lastProcSourceLine = "";
-          String targetLine = null;
-          String procTargetLine = null;
-          BinaryFileBuffer bfb = null;
-          final Set<String> targetLines = new HashSet<String>();
+          // Target file writer...
+          final BufferedWriter targetWriter =
+              new BufferedWriter(
+                  new OutputStreamWriter(
+                      new FileOutputStream(outputTargetFile), outputCharSet));
 
-          while(pq.size() > 0) {
-            bfb = pq.poll();
+          try {
+            // Merge...
+            long lineCounter = 0;
+            long targetPos = 0;
+            long noDuplicates = 0;
+            String sourceLine = null;
+            String procSourceLine = null;
+            String lastProcSourceLine = "";
+            String targetLine = null;
+            String procTargetLine = null;
+            BinaryFileBuffer bfb = null;
+            ImmutablePair<String, String> parsedLine = null;
+            final Set<String> targetLines = new HashSet<String>();
 
-            // Get source line
-            sourceLine = bfb.pop();
-            procSourceLine = lineProcessor.apply(sourceLine);
+            while(pq.size() > 0) {
+              bfb = pq.poll();
 
-            // Target line
-            targetLine = bfb.pop();
-            // ...and process
-            procTargetLine = lineProcessor.apply(targetLine);
+              // Parse the raw line
+              parsedLine = lineParser.apply(bfb.pop());
+              sourceLine = parsedLine.getRight();
+              // Process source line
+              procSourceLine = lineProcessor.apply(sourceLine);
 
-            System.err.println("Source " + sourceLine);
-            System.err.println("Last source " + ((lastProcSourceLine == null) ? "" : lastProcSourceLine));
-            System.err.println("Target " + targetLine);
-            
-            if(procSourceLine.compareTo(lastProcSourceLine) == 0) {
-              if(targetLines.contains(procTargetLine) == false) {
-                targetLines.add(procTargetLine);
+              // Set the position in the target file
+              targetPos = Long.parseLong(parsedLine.getLeft(), 16);
 
-                // Write source and target lines
+              // Lookup target line
+              targetInputChannel.position(targetPos);
+              final BufferedReader targetReader = new BufferedReader(
+                  new InputStreamReader(targetInputStream, inputCharSet));
+              targetLine = targetReader.readLine();
+              
+//              System.err.println("Source " + sourceLine + " (" + procSourceLine + ")");
+//              System.err.println("Target " + targetLine);
+              
+              if(procSourceLine.compareTo(lastProcSourceLine) == 0) {
+                procTargetLine = lineProcessor.apply(targetLine);
+
+                if(targetLines.contains(procTargetLine) == false) {
+//                  System.err.println("PROC TL " + procTargetLine);
+                  targetLines.add(procTargetLine);
+
+                  // Write source and target lines
+                  lineCounter = writeSourceAndTargetLines(
+                      sourceWriter,
+                      sourceLine,
+                      targetWriter,
+                      targetLine,
+                      lineCounter);
+                } else {
+                  // Update the duplicates
+//                  System.err.println("DUP!");
+                  noDuplicates++;
+                }
+              } else {
+//                System.err.println("NEW SET");
+                // Make a new set
+                targetLines.clear();
+                targetLines.add(lineProcessor.apply(targetLine));
+
+                // Write source and target files
                 lineCounter = writeSourceAndTargetLines(
                     sourceWriter,
                     sourceLine,
                     targetWriter,
                     targetLine,
                     lineCounter);
-              } else {
-                // Update the duplicates
-                noDuplicates++;
               }
-            } else {
-              // Make a new set
-              targetLines.clear();
-              targetLines.add(procTargetLine);
 
-              // Write source and target files
-              lineCounter = writeSourceAndTargetLines(
-                  sourceWriter,
-                  sourceLine,
-                  targetWriter,
-                  targetLine,
-                  lineCounter);
+              lastProcSourceLine = procSourceLine;
+
+              if(bfb.empty() == true) {
+                bfb.fbr.close();
+                bfb.originalfile.delete();// we don't need you anymore
+              } else {
+                pq.add(bfb); // add it back
+              }
             }
 
-            lastProcSourceLine = procSourceLine;
-
-            if(bfb.empty() == true) {
-              bfb.fbr.close();
-              bfb.originalfile.delete();// we don't need you anymore
-            } else {
-              pq.add(bfb); // add it back
-            }
+            return new ImmutablePair<Long, Long>(noDuplicates, lineCounter);
+          } finally {
+            targetWriter.close();
           }
-
-          return new ImmutablePair<Long, Long>(noDuplicates, lineCounter);
         } finally {
-          targetWriter.close();
+          targetInputStream.close();
         }
       } finally {
         sourceWriter.close();
@@ -321,7 +350,7 @@ public class CorpusSorter implements ICorpusSorter {
   private final String sortedExtension;
   private final int maxNoTempFiles;
 
-  public CorpusSorter(
+  public CorpusUniquer(
       final File theSourceFile,
       final File theTargetFile,
       final Charset theInputCharSet,
@@ -338,7 +367,7 @@ public class CorpusSorter implements ICorpusSorter {
     maxNoTempFiles = theMaxNumOfTempFiles;
   }
 
-  public ImmutablePair<Long, Long> sortWithUniquing() throws Exception {
+  public ImmutablePair<Long, Long> unique() throws Exception {
     final List<File> missingFiles = new ArrayList<File>() {
       private static final long serialVersionUID = 2350695434693544950L;
       {
@@ -370,7 +399,7 @@ public class CorpusSorter implements ICorpusSorter {
     final Comparator<String> comparator = new Comparator<String>() {
       @Override
       public int compare(String r1, String r2) {
-        return r1.compareTo(r2);
+        return r1.toLowerCase().compareTo(r2.toLowerCase());
       }
     };
 
