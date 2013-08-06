@@ -159,6 +159,23 @@ public class CorpusUniquerTest {
     
     verifyFiles(targetUniqSource, targetUniqTarget);
 	}
+
+  @Test
+  public void testCorpusSort() throws Exception {
+    final String[] source = {"z", "x", "s", "p", "e", "c", "t", "r", "u", "m"};
+    final String[] target = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
+    final String[] targetSource = {"c", "e", "m", "p", "r", "s", "t", "u", "x", "z"};
+    final String[] targetTarget = {"6", "5", "10", "4", "8", "3", "7", "9", "2", "1"};
+    
+    createTestAndVerify(
+        source,
+        target,
+        targetSource,
+        targetTarget,
+        10,
+        0,
+        ICorpusUniquer.UNLIMITED_TOKENS);
+  }
 	
 	@Test
 	public void testWithDuplicates() throws Exception {
@@ -189,19 +206,30 @@ public class CorpusUniquerTest {
   }
 	
 	@Test
-	public void testCorpusSort() throws Exception {
-	  final String[] source = {"z", "x", "s", "p", "e", "c", "t", "r", "u", "m"};
-	  final String[] target = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
-	  final String[] targetSource = {"c", "e", "m", "p", "r", "s", "t", "u", "x", "z"};
-	  final String[] targetTarget = {"6", "5", "10", "4", "8", "3", "7", "9", "2", "1"};
-	  
+	public void testFilterLongSentences() throws Exception {
+	  final String[] source = {
+	      "A",
+	      "A B",
+	      "A B C",
+	      "A B C D",
+	      "A B C D E",
+	      "A B C D E F"
+	  };
+	  final String[] target = {"1", "2", "3", "4", "5", "6"};
+    final String[] targetSource = {
+        "A",
+        "A B",
+        "A B C",
+    };
+    final String[] targetTarget = {"1", "2", "3"};
+
 	  createTestAndVerify(
-        source,
-        target,
-        targetSource,
-        targetTarget,
-        10,
-        0,
-        ICorpusUniquer.UNLIMITED_TOKENS);
-	}
+	      source,
+	      target,
+	      targetSource,
+	      targetTarget,
+	      3,
+	      0,
+	      3);
+	  }
 }
