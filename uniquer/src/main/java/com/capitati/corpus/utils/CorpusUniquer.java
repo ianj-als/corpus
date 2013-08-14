@@ -89,13 +89,13 @@ public class CorpusUniquer implements ICorpusUniquer {
 
             while(currentblocksize < blockSize) {
               // Get next line from source 
-              sourceLine = sourceReader.readLine();
+              sourceLine = StringUtils.strip(sourceReader.readLine());
               if(sourceLine == null) {
                 break;
               }
               
               // Read the target line...
-              targetLine = targetReader.readLine();
+              targetLine = StringUtils.strip(targetReader.readLine());
               if(targetLine == null) {
                 break;
               }
@@ -123,7 +123,9 @@ public class CorpusUniquer implements ICorpusUniquer {
             final ImmutablePair<File, File> tempFiles =
                 sortAndSave(lines, comparator);
             try {
-              files.add(tempFiles);
+              if(tempFiles != null) {
+                files.add(tempFiles);
+              }
             } catch(final NullPointerException ex) {
               // Ignore...
             }

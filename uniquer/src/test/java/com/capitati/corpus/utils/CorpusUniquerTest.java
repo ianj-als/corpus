@@ -232,4 +232,35 @@ public class CorpusUniquerTest {
 	      0,
 	      3);
 	  }
+
+	@Test
+	public void testEmptyLines() throws Exception {
+	  final String[] source = {
+        "",
+        " ",
+        "   ",
+        "A B C D",
+        "A B C D E",
+        "A B C D E F"
+    };
+    final String[] target = {
+        "A",
+        "A B",
+        "A B C",
+        "",
+        " ",
+        "  "
+    };
+    final String[] targetSource = new String[0];
+    final String[] targetTarget = new String[0];
+
+    createTestAndVerify(
+        source,
+        target,
+        targetSource,
+        targetTarget,
+        0,
+        0,
+        ICorpusUniquer.UNLIMITED_TOKENS);
+	}
 }
