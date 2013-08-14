@@ -55,7 +55,7 @@ public class CorpusUniquer implements ICorpusUniquer {
 
   private List<ImmutablePair<File, File>> sortInBatch(
       final Comparator<String> comparator,
-      final Function<String, Boolean> filter)
+      final Function<ImmutablePair<String, String>, Boolean> filter)
   throws IOException {
     final List<ImmutablePair<File, File>> files =
         new ArrayList<ImmutablePair<File, File>>();
@@ -81,6 +81,7 @@ public class CorpusUniquer implements ICorpusUniquer {
 
         String sourceLine = "";
         String targetLine = "";
+        ImmutablePair<String, String> sourceTarget = null;
 
         try {
           while(sourceLine != null) {
@@ -95,9 +96,14 @@ public class CorpusUniquer implements ICorpusUniquer {
               
               // Read the target line...
               targetLine = targetReader.readLine();
+              if(targetLine == null) {
+                break;
+              }
 
-              // Filter on the number of tokens
-              if(filter.apply(sourceLine) == false) {
+              // Filter
+              sourceTarget = new ImmutablePair<String, String>(
+                  sourceLine, targetLine);
+              if(filter.apply(sourceTarget) == false) {
                 logger.info(
                     "Dropping source sentence [" + sourceLine + "]" +
                     " with target sentence [" + targetLine + "]");
@@ -395,7 +401,7 @@ public class CorpusUniquer implements ICorpusUniquer {
       }
     };
 
-    final Function<String, Boolean> filter =
+    final Function<String, Boolean> noTokensFilter =
         (maxNoTokens <= ICorpusUniquer.UNLIMITED_TOKENS) ?
             new Function<String, Boolean>() {
               public Boolean apply(final String line) {
@@ -408,6 +414,19 @@ public class CorpusUniquer implements ICorpusUniquer {
                 return split.length <= maxNoTokens;
               }
             };
+    final Function<ImmutablePair<String, String>, Boolean> filter =
+        new Function<ImmutablePair<String, String>, Boolean>() {
+          public Boolean apply(final ImmutablePair<String, String> srcTrg) {
+            final String source = srcTrg.getLeft();
+            final String target = srcTrg.getRight();
+            
+            if(source.length() < 1 || target.length() < 1) {
+              return false;
+            }
+
+            return noTokensFilter.apply(source);
+          }
+        };
 
     logger.info(
         "Starting uniquing with [" + sourceFile.getCanonicalPath() +
