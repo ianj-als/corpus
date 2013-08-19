@@ -426,7 +426,12 @@ public class CorpusUniquer implements ICorpusUniquer {
               return false;
             }
 
-            return noTokensFilter.apply(source);
+            if(noTokensFilter.apply(source) == false ||
+               noTokensFilter.apply(target) == false) {
+              return false;
+            }
+            
+            return true;
           }
         };
 
